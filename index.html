@@ -1,0 +1,33 @@
+<!doctype html>
+<html><head>
+  <meta charset="utf-8">
+  <title>VDOM or Not VDOM — Demo Menu</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 0 16px; }
+    h1 { font-size: 1.4em; }
+    h2 { font-size: 1.1em; margin-top: 24px; color: #555; }
+    a { display: block; padding: 4px 0; }
+  </style>
+</head><body>
+  <h1>VDOM or Not VDOM — Demo Menu</h1>
+
+  <h2>Vanilla baseline</h2>
+  <a href="implementations/vanilla/dist/">vanilla — full innerHTML rebuild</a>
+
+  <h2>React (naive vs compiled)</h2>
+  <a href="implementations/react-naive/dist/">react-naive — no memoization</a>
+  <a href="implementations/react-compiled/dist/">react-compiled — same source, React Compiler enabled</a>
+
+  <h2>Elm</h2>
+  <a href="implementations/elm/dist/">elm — virtual-dom + Html.Lazy</a>
+
+  <h2>Solid</h2>
+  <a href="implementations/solid/dist/">solid — fine-grained signals</a>
+
+  <h2>Svelte</h2>
+  <a href="implementations/svelte/dist/">svelte — Svelte 5 runes</a>
+
+  <h2>Laminar (naive vs fixed)</h2>
+  <a href="implementations/laminar-naive/dist/">laminar-naive — bundled signal (bug)</a>
+  <a href="implementations/laminar-fixed/dist/">laminar-fixed — unbundled via .distinct (fix)</a>
+</body></html>

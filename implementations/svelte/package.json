@@ -1,0 +1,17 @@
+{
+  "name": "svelte",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "sideEffects": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node -e \"const f=require('fs');let h=f.readFileSync('dist/index.html','utf8');h=h.replace('<script type=\\\"module\\\" crossorigin src=\\\"/bundle.js\\\"></script>','<script src=\\\"./bundle.js\\\"></script>');f.writeFileSync('dist/index.html',h)\"",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.2.0",
+    "svelte": "^5.56.8",
+    "vite": "^8.2.0"
+  }
+}
