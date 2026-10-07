@@ -3,6 +3,7 @@
                               // flattens the reactive proxy and breaks per-field tracking
 </script>
 
+<div class="vdom-tabs-label">Region</div>
 <div class="vdom-tabs">
   {#each ["Europe", "Africa", "Asia"] as r}
     <div class="vdom-tab {r === state.region ? 'active' : ''}">{r}</div>

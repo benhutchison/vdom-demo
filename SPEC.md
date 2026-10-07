@@ -11,12 +11,12 @@ looks the way it does):
 
 - `harness/harness.js` and `implementations/solid/src/main.jsx` are now
   provided as **external file artifacts**, not embedded as code blocks in
-  this document — see Section 6.2 and Task 5. Copy them in verbatim; don't
+  this document — see Section 6.3 and Task 5. Copy them in verbatim; don't
   reconstruct them from prose.
 - The harness now tracks same-region and region-switch metrics separately,
   with running totals, per-tick averages, a "last update" readout, and an
   audience-facing glossary (hover tooltips + on-page anchor links) for every
-  metric — see Section 6.2.
+  metric — see Section 6.3.
 - Fixed a real bug in the `MutationObserver` wiring: `childList` mutations
   were being attributed to the parent container instead of the actual
   added/removed nodes, which silently undercounted and flashed the wrong
@@ -140,6 +140,14 @@ of the same underlying lesson — see that task's "known issue" callout —
 which may be worth including in the talk alongside the staged pairs, since
 it wasn't engineered in on purpose.
 
+**On keeping `react-compiled`:** both React variants are kept even though
+the current DOM-mutation metric shows no visible difference between them.
+Avoiding unnecessary DOM writes isn't the only axis of optimization that
+matters — avoiding unnecessary *virtual DOM* recomputation is a distinct,
+additional one, and this pair is a useful standing reminder of that. The
+demo may later be extended (e.g., a component-invocation counter) to
+surface it, but that's a future enhancement, not a blocker.
+
 ---
 
 ## 3. Repository layout
@@ -149,10 +157,10 @@ vdom-demo/
 ├── index.html                      # top-level menu linking to all 8 demos
 ├── VERSIONS.md                     # record exact installed tool versions here - see Def. of Done
 ├── harness/
-│   ├── harness.js                  # EXTERNAL ARTIFACT - copy in verbatim, see Section 6.2
+│   ├── harness.js                  # EXTERNAL ARTIFACT - copy in verbatim, see Section 6.3
 │   ├── harness.css                 # shared styling - every impl reuses these class names verbatim
 │   └── sequence/
-│       ├── generate.mjs            # deterministic sequence generator (Node, no deps) - Section 6.1
+│       ├── generate.mjs            # deterministic sequence generator (Node, no deps) - Section 6.2
 │       └── sequence.json           # committed output of `node generate.mjs`
 └── implementations/
     ├── vanilla/
@@ -191,7 +199,7 @@ type Flight = {
   id: string;         // stable identity key - never changes for a given flight
   flightNum: string;  // immutable, display-only
   status: "Airborne" | "Landed"; // slow-changing
-  lastPing: number;   // fast-changing counter
+  lastPing: string;   // "HH:MM:SS" - pre-formatted, display as-is
 };
 
 type State = {
@@ -212,7 +220,7 @@ specifically so that frameworks/patterns relying on object or key identity
 (Solid's `<For>`, keyed reconciliation generally) have something reliable
 to match against — the generator preserves `id` per logical flight across
 steps, but does *not* guarantee object-reference stability for unchanged
-flights across steps (see Section 6.1) — each implementation, not the data
+flights across steps (see Section 6.2) — each implementation, not the data
 layer, is responsible for reconciling by `id` where its own framework's
 performance depends on it.
 
@@ -260,11 +268,81 @@ something else.
 
 ## 6. Shared harness (build this first - Task 0)
 
-### 6.1 Sequence generator
+### 6.1 The simulated workload
+
+Every implementation is judged against the exact same scripted sequence of
+state changes, so this sequence *is* the yardstick the whole demo rests on
+— it deserves to be chosen deliberately and described explicitly, not left
+as an implementation detail buried in a generator script.
+
+Seven kinds of change occur, each stressing a different aspect of
+incremental update handling:
+
+| Kind | What it represents | What it stresses | Relative frequency |
+|---|---|---|---|
+| `ping` | One flight's last-contact time updates | The minimal case: does the implementation touch exactly one cell, or more? | Common |
+| `pingBatch` | Three different flights' last-contact times update together, in one tick | Coalesced updates — real systems commonly batch several independent events that land within the same processing window. Does the implementation handle three simultaneous small changes as three small changes, or does it lump them into something coarser? | **Most common** |
+| `statusFlip` | One flight transitions Airborne → Landed | A different field on the same row changing — does the implementation distinguish *which field* changed, not just *which row*? | Rare |
+| `add` | A new flight appears (always Airborne) | Structural growth, and whether new rows are added surgically or trigger wider re-rendering | Occasional |
+| `remove` | A flight leaves (preferentially one that's Landed) | Structural shrinkage — and, combined with `add` at a matched frequency, keeps the row count roughly stable over a long run rather than drifting | Occasional, balanced with `add` |
+| `reorder` | The same flights, repositioned | Whether existing DOM nodes are moved, or destroyed and recreated, when identity is preserved but position isn't | Rare |
+| `regionSwitch` | The visible region changes entirely | The one case where touching a lot of the screen is *correct*, not wasteful — a check that implementations don't over-optimize into never updating anything | Rare (roughly 1 in 9 ticks) |
+
+**Why pings dominate.** In a real flight-tracking system, aircraft report
+their position continuously and independently — with dozens of aircraft
+each pinging every few seconds, it would be unusual for a given rendering
+window to contain *no* pings, and in practice several aircraft's updates
+landing in the same window (a `pingBatch`) is the common case, not the
+exception; an isolated single-flight `ping` is the less frequent case,
+representing the moments where coalescing happens not to occur. Structural
+changes — a flight entering or leaving the tracked region, landing, or the
+list being resequenced — are comparatively rare events against that
+backdrop. The generator reflects this: pings (batched and single, combined)
+make up roughly 60% of ticks, structural changes the remaining 40%, split
+evenly across the four structural kinds.
+
+**A deliberate departure from strict realism.** A fully realistic
+simulation would likely skew even further toward batched pings, to the
+point where an isolated single-flight ping becomes a minor edge case rather
+than a clearly-represented category. We've kept `ping` and `pingBatch` as
+distinct, comparably-sized categories on purpose, because the demo's job is
+to make the *contrast* between "one thing changed" and "several things
+changed at once" legible to an audience watching counts on a screen —
+pedagogical clarity won out over strict traffic-pattern accuracy here, and
+that trade-off is worth being upfront about rather than presenting the
+frequencies as a literal traffic model.
+
+**Flights now follow a simple one-way lifecycle**, rather than every field
+being an independent coin-flip on every step: a flight is created Airborne,
+can flip to Landed at most once (never the reverse — aircraft don't
+un-land), and `remove` preferentially selects a Landed flight when one is
+available. This is a deliberate simplification short of full realism — in a
+fuller simulation, landing and removal would likely be causally linked (a
+flight gets removed *because* it landed and taxied off the tracked board,
+probably soon after) rather than two independently rolled events that
+merely share a preference for the same kind of flight. We judged that full
+causal link not worth the added generator complexity for what this demo
+needs to show, and are naming it here as a known, accepted gap rather than
+leaving it unexamined.
+
+**`reorder` is kept intentionally simple and independent** — modeled as an
+occasional resequencing unrelated to any other field (e.g., as if some
+other sort criterion elsewhere in the system occasionally changes), rather
+than derived from sorting by any of our own fields. Tying it to, say,
+"re-sort by most recent ping" would have made it far more frequent and
+entangled with the `ping`/`pingBatch` story in ways that would muddy rather
+than sharpen the comparison.
+
+**`regionSwitch` frequency is unchanged from the original design** (every
+9th tick by default) — it represents the presenter/operator occasionally
+switching focus, which should be clearly rarer than the data ticking over
+underneath whichever region is currently showing.
+
+### 6.2 Sequence generator
 
 `harness/sequence/generate.mjs` - deterministic, seeded, no npm dependencies.
 Cycles through a fixed recipe of transition kinds so every kind of change
-(ping-only, single-field flip, add, remove, reorder, region-switch) is
+(ping, pingBatch, status flip, add, remove, reorder, region-switch) is
 guaranteed to occur rather than hoped-for from randomness. Every step is
 tagged with a `kind` field so the harness can label what just happened, not
 just count it.
@@ -286,6 +364,7 @@ across a JSON file.
 // Run: node generate.mjs [--rows=40] [--steps=60] [--switchEvery=9] [--seed=20260731] > sequence.json
 
 const REGIONS = ["Europe", "Africa", "Asia"];
+const SIM_CLOCK_START_MS = Date.UTC(2026, 0, 1, 9, 0, 0); // fixed, arbitrary anchor - not tied to real time
 
 function mulberry32(seed) {
   return function () {
@@ -308,42 +387,106 @@ function parseArgs() {
   };
 }
 
-function makeFlight(rng, id) {
+// Formats a simulated-clock millisecond value as "HH:MM:SS". Uses UTC
+// getters deliberately - local-time getters would make the output depend
+// on the generating machine's timezone, breaking reproducibility.
+function formatTime(ms) {
+  const d = new Date(ms);
+  const pad = n => String(n).padStart(2, "0");
+  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
+
+// Advances the shared simulated clock by a random 5-45 "seconds" and
+// returns the new value, formatted. `clock` is a mutable { ms } carried
+// through generation, same pattern as the `nextId` counter below.
+function advanceClock(rng, clock) {
+  clock.ms += 5000 + Math.floor(rng() * 40000);
+  return formatTime(clock.ms);
+}
+
+// opts.forceAirborne: used for `add` events, where a newly-appearing
+// flight should always start Airborne. initialFlights (seeding a fresh
+// snapshot of ongoing traffic) omits it, so those get a random mix - some
+// already Landed, some already Airborne, representing a slice of traffic
+// already in progress.
+function makeFlight(rng, clock, id, opts = {}) {
   return {
     id,
     flightNum: `FL${100 + Math.floor(rng() * 900)}`,
-    status: rng() < 0.5 ? "Airborne" : "Landed",
-    lastPing: 0,
+    status: opts.forceAirborne ? "Airborne" : (rng() < 0.5 ? "Airborne" : "Landed"),
+    lastPing: advanceClock(rng, clock),
   };
 }
 
-function initialFlights(rng, rows) {
-  return Array.from({ length: rows }, (_, i) => makeFlight(rng, `f${i}`));
+function initialFlights(rng, clock, rows) {
+  return Array.from({ length: rows }, (_, i) => makeFlight(rng, clock, `f${i}`));
 }
 
-// Fixed recipe: guarantees coverage of every transition kind rather than
-// relying on chance. Tweak the mix here if you want more/fewer of a kind.
-const RECIPE = ["ping", "ping", "statusFlip", "add", "ping", "remove", "reorder", "ping"];
+// Rebalanced recipe: pings (batched + single) dominate at roughly 60%,
+// with the four structural kinds splitting the remaining 40% evenly. See
+// "The simulated workload" in SPEC.md for the full rationale.
+const RECIPE = [
+  "pingBatch", "ping", "pingBatch", "statusFlip",
+  "pingBatch", "add", "pingBatch", "remove",
+  "ping", "reorder",
+];
 
-function applyStep(rng, prevFlights, kind, nextId) {
+function applyStep(rng, clock, prevFlights, kind, nextId) {
   let flights = prevFlights.map(f => ({ ...f }));
   switch (kind) {
     case "ping": {
       const i = Math.floor(rng() * flights.length);
-      flights[i] = { ...flights[i], lastPing: flights[i].lastPing + 1 };
+      flights[i] = { ...flights[i], lastPing: advanceClock(rng, clock) };
+      break;
+    }
+    case "pingBatch": {
+      // 3 distinct flights, each getting its own independently-advanced
+      // timestamp - not all 3 sharing one instant, since each flight's
+      // actual last-contact moment is independent; "batch" here means
+      // "processed together in one tick," not "happened at one instant."
+      const batchSize = Math.min(3, flights.length);
+      const chosen = new Set();
+      while (chosen.size < batchSize) chosen.add(Math.floor(rng() * flights.length));
+      for (const i of chosen) {
+        flights[i] = { ...flights[i], lastPing: advanceClock(rng, clock) };
+      }
       break;
     }
     case "statusFlip": {
-      const i = Math.floor(rng() * flights.length);
-      flights[i] = { ...flights[i], status: flights[i].status === "Airborne" ? "Landed" : "Airborne" };
+      // One-way lifecycle: only ever Airborne -> Landed, never the
+      // reverse. If nothing is currently Airborne, fall back to a ping
+      // rather than silently doing nothing this step.
+      const airborneIdxs = flights
+        .map((f, i) => [f, i])
+        .filter(([f]) => f.status === "Airborne")
+        .map(([, i]) => i);
+      if (airborneIdxs.length === 0) {
+        const i = Math.floor(rng() * flights.length);
+        flights[i] = { ...flights[i], lastPing: advanceClock(rng, clock) };
+      } else {
+        const i = airborneIdxs[Math.floor(rng() * airborneIdxs.length)];
+        flights[i] = { ...flights[i], status: "Landed" };
+      }
       break;
     }
     case "add": {
-      flights.push(makeFlight(rng, `f${nextId.n++}`));
+      flights.push(makeFlight(rng, clock, `f${nextId.n++}`, { forceAirborne: true }));
       break;
     }
     case "remove": {
-      if (flights.length > 3) flights.splice(Math.floor(rng() * flights.length), 1);
+      if (flights.length > 3) {
+        // Prefer removing a Landed flight (a flight that's left the
+        // active board, having already landed) - fall back to any flight
+        // if none are currently Landed.
+        const landedIdxs = flights
+          .map((f, i) => [f, i])
+          .filter(([f]) => f.status === "Landed")
+          .map(([, i]) => i);
+        const i = landedIdxs.length > 0
+          ? landedIdxs[Math.floor(rng() * landedIdxs.length)]
+          : Math.floor(rng() * flights.length);
+        flights.splice(i, 1);
+      }
       break;
     }
     case "reorder": {
@@ -363,8 +506,9 @@ function applyStep(rng, prevFlights, kind, nextId) {
 
 function generate({ rows, steps, switchEvery, seed }) {
   const rng = mulberry32(seed);
+  const clock = { ms: SIM_CLOCK_START_MS };
   let region = REGIONS[0];
-  let flights = initialFlights(rng, rows);
+  let flights = initialFlights(rng, clock, rows);
   const nextId = { n: rows };
   const sequence = [{ region, flights, kind: "initial" }];
 
@@ -373,11 +517,11 @@ function generate({ rows, steps, switchEvery, seed }) {
     if ((s + 1) % switchEvery === 0) {
       const others = REGIONS.filter(r => r !== region);
       region = others[Math.floor(rng() * others.length)];
-      flights = initialFlights(rng, rows); // a region switch means a whole new flight list
+      flights = initialFlights(rng, clock, rows); // a region switch means a whole new flight list
       kind = "regionSwitch";
     } else {
       kind = RECIPE[s % RECIPE.length];
-      flights = applyStep(rng, flights, kind, nextId);
+      flights = applyStep(rng, clock, flights, kind, nextId);
     }
     sequence.push({ region, flights: flights.map(f => ({ ...f })), kind });
   }
@@ -388,12 +532,19 @@ const config = parseArgs();
 process.stdout.write(JSON.stringify({ config, sequence: generate(config) }, null, 2));
 ```
 
-**Acceptance check:** `node generate.mjs > sequence.json` runs with no
-dependencies installed, produces valid JSON, `sequence.length === steps + 1`,
-every entry has a `kind` field, and re-running with the same args
-byte-for-byte reproduces the same file.
+**Acceptance check:** regenerate `sequence.json`
+(`node generate.mjs > sequence.json`), then confirm:
+- a `pingBatch` tally shows up in the `kind` distribution
+  (`grep -o '"kind": *"[a-zA-Z]*"' sequence.json | sort | uniq -c`), at
+  roughly 4x the frequency of `remove`/`add`/`statusFlip`/`reorder`
+- no flight ever shows `status` flipping from `Landed` back to `Airborne`
+  across consecutive steps for the same `id` within a single region's
+  continuous run (region switches regenerate the flight list, so ids are
+  reused across them)
+- every newly-`add`ed flight (one not present in the previous step) starts
+  as `Airborne`
 
-### 6.2 `harness/harness.js` — external artifact
+### 6.3 `harness/harness.js` — external artifact
 
 **This file is provided separately and must be copied in verbatim to
 `harness/harness.js`.** It is no longer reproduced as a code block here —
@@ -440,7 +591,7 @@ reconstructing it from this description. What it does:
   markup, so its position on screen doesn't shift as those labels' text
   length varies between ticks
 
-### 6.3 `harness/harness.css`
+### 6.4 `harness/harness.css`
 
 ```css
 body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; }
@@ -448,12 +599,28 @@ body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; }
 .vdom-demo-upperrow { display: flex; gap: 24px; align-items: center; margin-bottom: 8px; }
 #vdom-demo-apply { padding: 6px 16px; font-size: 1em; cursor: pointer; }
 
-.vdom-tabs { display: flex; gap: 8px; margin-bottom: 8px; }
-.vdom-tab { padding: 6px 14px; border: 1px solid #ccc; border-radius: 6px 6px 0 0; }
-.vdom-tab.active { background: #333; color: white; font-weight: bold; }
+.vdom-tabs-label { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; color: #888; margin-bottom: 4px; }
+.vdom-tabs { display: flex; gap: 4px; border-bottom: 2px solid #333; margin-bottom: 0; }
+.vdom-tab {
+  padding: 8px 18px;
+  border: 1px solid #ccc;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: #e8e8e8;
+  color: #555;
+  margin-bottom: -2px; /* sit on top of .vdom-tabs' bottom border */
+}
+.vdom-tab.active {
+  background: white;
+  color: #111;
+  font-weight: bold;
+  border-color: #333;
+  border-bottom: 2px solid white; /* merges into the (white) content area below */
+}
 
 .vdom-table { width: 100%; border-collapse: collapse; }
 .vdom-table th, .vdom-table td { border-bottom: 1px solid #eee; padding: 4px 10px; text-align: left; }
+.vdom-table { margin-top: 8px; }
 
 .vdom-demo-flash { background-color: #fff176 !important; transition: background-color 0.4s ease-out; }
 
@@ -480,7 +647,7 @@ CSS framework or write competing styles.** The point is that the rendered
 output looks identical no matter which implementation is mounted - the only
 visible difference should be the counters and the flash.
 
-### 6.4 Top-level `index.html`
+### 6.5 Top-level `index.html`
 
 A one-page menu linking to `implementations/<name>/dist/index.html` for all
 8 implementations, grouped as: Vanilla baseline / React (naive vs compiled)
@@ -648,17 +815,13 @@ export default defineConfig({
 })
 ```
 
-**Acceptance check:** using the exact same scripted sequence, this
-implementation's same-region-tick counter should be measurably lower than
-`react-naive`'s, since a flights-only update should no longer cause the tab
-bar's DOM to be touched at all (compiler-inserted memoization should let
-React skip re-invoking `TabBar` when `region` hasn't changed). If you don't
-see a measurable difference, check the build output confirms the Babel
-plugin actually ran (look for compiler-inserted `_c()` cache-slot calls in
-the built bundle) before concluding it isn't working - this toolchain
-combination is only months old as of this spec, so verify empirically
-rather than assume the config above is exactly right for whatever patch
-versions you land on.
+**Acceptance check:** confirm the build output shows the React Compiler
+actually ran (look for compiler-inserted `_c()` cache-slot calls in the
+built bundle) before concluding anything about its effect. No
+DOM-mutation-count difference from `react-naive` is expected or required —
+the compiler avoids virtual-DOM recomputation rather than DOM writes, and
+the current metrics don't surface that (see Section 2's note on keeping
+this pair).
 
 ### Task 4 - `elm`
 
@@ -767,7 +930,7 @@ table** — more nodes than exist in the entire tree, which only happens when
 whole subtrees are being destroyed and rebuilt rather than updated in
 place. The cause: Solid's `<For>` keys each rendered row by the **object
 reference** of the array item, not by any `id` field inside it. The
-generator's `applyStep` (Section 6.1) spreads every flight into a fresh
+generator's `applyStep` (Section 6.2) spreads every flight into a fresh
 object on every step, including the 39 that didn't change at all — so from
 `<For>`'s point of view, all 40 incoming objects are "new," regardless of
 whether their actual field values changed. `<For>` tore down and rebuilt
@@ -780,7 +943,7 @@ identity (and skips re-rendering entirely) for any flight whose fields are
 unchanged, patching only the specific fields that actually differ for ones
 that did change. This is what the provided `main.jsx` artifact implements.
 Note this is fixed on the *consuming* side, in Solid's own code — not by
-changing the generator (see the identity note at the end of Section 6.1
+changing the generator (see the identity note at the end of Section 6.2
 for why that wouldn't have worked anyway).
 
 **This is worth considering for the talk itself, alongside the staged
@@ -1013,8 +1176,8 @@ frameworks.
       counters/flash differ
 - [ ] `vanilla`'s same-region mutation count is the largest of all eight, by
       a wide margin
-- [ ] `react-compiled`'s same-region count is measurably lower than
-      `react-naive`'s, and the build output confirms the compiler actually ran
+- [ ] `react-compiled` is built and kept per Section 2's note; no
+      DOM-mutation-count difference from `react-naive` is expected or required
 - [ ] `elm`'s same-region count shows zero tab-bar churn (confirmed by
       temporarily removing `lazy` and seeing the count rise)
 - [ ] `solid`'s same-region `ping` ticks show single-digit mutation counts,

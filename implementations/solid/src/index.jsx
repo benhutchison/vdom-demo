@@ -5,6 +5,7 @@ import { createStore, reconcile } from "solid-js/store";
 function App(props) {
   return (
     <>
+      <div class="vdom-tabs-label">Region</div>
       <div class="vdom-tabs">
         {["Europe", "Africa", "Asia"].map(r =>
           <div class={`vdom-tab ${r === props.region() ? "active" : ""}`}>{r}</div>)}

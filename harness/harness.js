@@ -6,10 +6,11 @@
 
   const KIND_LABELS = {
     initial: "Initial state",
-    ping: "Ping (one flight's last-ping counter ticked)",
-    statusFlip: "Status flip (one flight's airborne/landed changed)",
-    add: "Flight added",
-    remove: "Flight removed",
+    ping: "Ping (one flight's last-ping time updated)",
+    pingBatch: "Ping batch (3 flights' last-ping times updated together)",
+    statusFlip: "Status flip (one flight transitioned Airborne → Landed)",
+    add: "Flight added (new, Airborne)",
+    remove: "Flight removed (a Landed flight leaving the board)",
     reorder: "Rows reordered (same flights, new order)",
     regionSwitch: "Region switch",
   };
@@ -205,7 +206,21 @@
       }));
     }
 
-    renderUpper();
+    // Initial readout waits until the container has actually been
+    // populated, so frameworks with an asynchronous commit (React's
+    // concurrent root) are measured only after they've rendered. Polling
+    // beats a fixed delay here: commit timing varies by framework, and a
+    // background tab pauses requestAnimationFrame, so rAF-based waits can
+    // fire after (or before) the commit rather than reliably after it.
+    let mountPolls = 0;
+    (function awaitMount() {
+      const hasContent = container.querySelectorAll("*").length > 0;
+      if (hasContent || mountPolls++ >= 100) {
+        renderUpper();
+        return;
+      }
+      setTimeout(awaitMount, 50);
+    })();
   }
 
   window.VdomHarness = { init };

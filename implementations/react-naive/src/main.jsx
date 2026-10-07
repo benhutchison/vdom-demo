@@ -2,10 +2,13 @@ import { createRoot } from "react-dom/client";
 
 function TabBar({ region }) {
   return (
-    <div className="vdom-tabs">
-      {["Europe", "Africa", "Asia"].map(r =>
-        <div key={r} className={`vdom-tab ${r === region ? "active" : ""}`}>{r}</div>)}
-    </div>
+    <>
+      <div className="vdom-tabs-label">Region</div>
+      <div className="vdom-tabs">
+        {["Europe", "Africa", "Asia"].map(r =>
+          <div key={r} className={`vdom-tab ${r === region ? "active" : ""}`}>{r}</div>)}
+      </div>
+    </>
   );
 }
 
