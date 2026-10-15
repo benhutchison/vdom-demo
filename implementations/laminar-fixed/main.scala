@@ -20,13 +20,20 @@ def decodeState(v: js.Any): DemoState = {
   )
 }
 
-def renderFlightRow(f: Flight) =
-  tr(td(f.flightNum), td(f.status), td(f.lastPing))
+// The row element is created once per stable Flight.id and reused; the
+// per-row signal channels updates into individual cells instead of
+// recreating the <tr> subtree.
+def renderFlightRow(flightId: String, initial: Flight, flightSignal: Signal[Flight]): HtmlElement =
+  tr(
+    td(text <-- flightSignal.map(_.flightNum).distinct),
+    td(text <-- flightSignal.map(_.status).distinct),
+    td(text <-- flightSignal.map(_.lastPing).distinct)
+  )
 
 @JSExportTopLevel("__VDOM_DEMO_MOUNT__")
 def mount(container: dom.Element, initialStateJs: js.Any): js.Object = {
   val stateVar = Var(decodeState(initialStateJs))
-  val regionSignal = stateVar.signal.map(_.region).distinct   // <-- the fix
+  val regionSignal = stateVar.signal.map(_.region).distinct
   val flightsSignal = stateVar.signal.map(_.flights)
 
   val app: Div =
@@ -39,7 +46,7 @@ def mount(container: dom.Element, initialStateJs: js.Any): js.Object = {
       ),
       table(cls := "vdom-table",
         thead(tr(th("Flight"), th("Status"), th("Last ping"))),
-        tbody(children <-- flightsSignal.map(_.map(renderFlightRow)))
+        tbody(children <-- flightsSignal.split(_.id)(renderFlightRow))
       )
     )
 

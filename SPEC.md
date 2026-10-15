@@ -37,7 +37,7 @@ looks the way it does):
 
 You are implementing a small multi-framework demo for a conference talk.
 The demo lets a presenter click "Apply" repeatedly on a scripted sequence of
-state updates and watch, side by side across eight implementations, how many
+state updates and watch, side by side across ten implementations, how many
 real DOM nodes each one actually touches per update.
 
 **Read Section 1 (Prerequisites) first and stop if anything there is
@@ -105,7 +105,7 @@ for extra tooling.
 
 ## 2. What we're building & why
 
-Eight small apps render the same UI (a region tab bar + a table of flights)
+Ten small apps render the same UI (a region tab bar + a table of flights)
 from the same data, driven by the same scripted sequence of state updates.
 A shared "harness" (plain HTML/CSS/JS, no framework, no build step) is
 responsible for:
@@ -119,7 +119,7 @@ responsible for:
 - explaining each displayed metric in plain language, for an audience that
   may not be deeply DOM-internals-literate
 
-Only the "real UI" (tab bar + table) differs per implementation. The eight
+Only the "real UI" (tab bar + table) differs per implementation. The ten
 implementations are:
 
 | # | Directory | What it shows |
@@ -129,16 +129,18 @@ implementations are:
 | 3 | `react-compiled` | byte-identical source to #2, but built with the React Compiler enabled |
 | 4 | `elm` | virtual-dom diffing + `Html.Lazy`, driven externally via a port |
 | 5 | `solid` | fine-grained signals/store, region and flights kept separately, flights merged via `reconcile` |
-| 6 | `svelte` | Svelte 5 runes, single `$state` proxy object, accessed per-field |
-| 7 | `laminar-naive` | Airstream FRP, region+flights bundled into one signal (deliberately wrong) |
-| 8 | `laminar-fixed` | same as #7, but region is unbundled via `.distinct` |
+| 6 | `solid-flawed` | same as #5, but flights fed through a plain signal as fresh objects (identity bug) |
+| 7 | `svelte` | Svelte 5 runes, single `$state` proxy object, accessed per-field |
+| 8 | `laminar-naive` | Airstream FRP, region+flights bundled into one signal (deliberately wrong) |
+| 9 | `laminar-flawed` | same as #8, but region is unbundled via `.distinct`; rows still unkeyed |
+| 10 | `laminar-fixed` | same as #9, plus rows keyed via `split(_.id)` |
 
-The naive/fixed Laminar pair and the naive/compiled React pair are the two
-most important *deliberately staged* comparisons in the whole demo. Task 5's
-Solid implementation turned up a third, *organically discovered* instance
-of the same underlying lesson — see that task's "known issue" callout —
-which may be worth including in the talk alongside the staged pairs, since
-it wasn't engineered in on purpose.
+The most important *deliberately staged* comparisons in the whole demo are
+the three-way Laminar pair (naive → flawed → fixed) and the naive/compiled
+React pair. The Solid flawed/fixed pair turns the identity lesson — first
+found organically in Task 5's known-issue callout — into an explicit
+side-by-side: `solid-flawed` feeds `<For>` fresh objects through a plain
+signal, while `solid` preserves row identity via `createStore` + `reconcile`.
 
 **On keeping `react-compiled`:** both React variants are kept even though
 the current DOM-mutation metric shows no visible difference between them.
@@ -154,7 +156,7 @@ surface it, but that's a future enhancement, not a blocker.
 
 ```
 vdom-demo/
-├── index.html                      # top-level menu linking to all 8 demos
+├── index.html                      # top-level menu linking to all 10 demos
 ├── VERSIONS.md                     # record exact installed tool versions here - see Def. of Done
 ├── harness/
 │   ├── harness.js                  # EXTERNAL ARTIFACT - copy in verbatim, see Section 6.3
@@ -168,9 +170,10 @@ vdom-demo/
     ├── react-compiled/
     ├── elm/
     ├── solid/
-    │   └── src/main.jsx            # EXTERNAL ARTIFACT - copy in verbatim, see Task 5
+    ├── solid-flawed/
     ├── svelte/
     ├── laminar-naive/
+    ├── laminar-flawed/
     └── laminar-fixed/
 ```
 
@@ -183,7 +186,7 @@ build at `implementations/<name>/dist/`, containing at minimum:
 - one compiled JS bundle exposing a single global function (see Section 5)
 
 The whole repo is served for the live talk by one static file server at
-the repo root (e.g. `npx serve .`), never by 8 separate dev servers - that
+the repo root (e.g. `npx serve .`), never by 10 separate dev servers - that
 way relative paths to the shared harness resolve identically everywhere and
 switching frameworks during the talk is just clicking a different link on
 the top-level `index.html`.
@@ -650,8 +653,9 @@ visible difference should be the counters and the flash.
 ### 6.5 Top-level `index.html`
 
 A one-page menu linking to `implementations/<name>/dist/index.html` for all
-8 implementations, grouped as: Vanilla baseline / React (naive vs compiled)
-/ Elm / Solid / Svelte / Laminar (naive vs fixed). Plain links, no JS needed.
+10 implementations, grouped as: Vanilla baseline / React (naive vs compiled)
+/ Elm / Solid (fixed vs flawed) / Svelte / Laminar (naive vs flawed vs
+fixed). Plain links, no JS needed.
 
 **Acceptance check for Task 0:** `sequence.json` exists, is valid, and every
 entry has a `kind` field; `harness.js` (the external artifact) and
@@ -1107,20 +1111,21 @@ should flash on every Apply, not just on region-switch ticks) before moving
 to Task 8 - if the tab bar does NOT churn on same-region ticks, this task
 hasn't reproduced the bug and needs revisiting.
 
-### Task 8 - `laminar-fixed`
+### Task 8 - `laminar-flawed`
 
 Identical to Task 7 (same `//> using` header, same scaffold, same
 `decodeState`/`renderFlightRow`) except for the tab-bar wiring: unbundle
 region into its own `.distinct`-ed signal, and update `cls` on tab elements
-created once, rather than replacing the whole tab bar.
+created once, rather than replacing the whole tab bar. The table rows stay
+unkeyed on purpose.
 
 ```scala
-// implementations/laminar-fixed/main.scala - same header/decoders as Task 7
+// implementations/laminar-flawed/main.scala - same header/decoders as Task 7
 
 @JSExportTopLevel("__VDOM_DEMO_MOUNT__")
 def mount(container: dom.Element, initialStateJs: js.Any): js.Object = {
   val stateVar = Var(decodeState(initialStateJs))
-  val regionSignal = stateVar.signal.map(_.region).distinct   // <-- the fix
+  val regionSignal = stateVar.signal.map(_.region).distinct   // <-- fixes tab churn only
   val flightsSignal = stateVar.signal.map(_.flights)
 
   val app: Div =
@@ -1141,15 +1146,36 @@ def mount(container: dom.Element, initialStateJs: js.Any): js.Object = {
 }
 ```
 
-Package the same way as Task 7 (`scala-cli --power package --js main.scala
---js-module-kind none --output dist/bundle.js`).
+Package the same way as Task 7.
 
 **Acceptance check:** same-region ticks show zero tab-bar mutations and no
-flash on the tab elements - only the flight table flashes. This is the
-comparison the whole talk hinges on: run `laminar-naive` and `laminar-fixed`
-back to back on the identical sequence and confirm the same-region counters
-diverge sharply, ideally more than the gap between any two of the other five
-frameworks.
+flash on the tab elements - only the flight table flashes. The table rows
+still rebuild on every tick (near-full-table mutation counts), which is the
+flaw this variant exists to demonstrate.
+
+### Task 9 - `laminar-fixed` (keyed rows)
+
+Same scaffold, header, `decodeState`, and `.distinct`-ed region signal as
+Task 8. The only difference is the table body: key rows with Airstream's
+`split(_.id)` and render each cell from the per-row signal, so a given
+`Flight.id` reuses its `<tr>` and only the changed cells update. See
+`SpecUpdate2.md` §2 for the full code.
+
+**Acceptance check:** same-region `ping`/`pingBatch`/`statusFlip` ticks touch
+only the affected cell(s); `add`/`remove` touch one row subtree; `reorder`
+moves retained rows. Same-region totals are dramatically lower than
+`laminar-flawed`.
+
+### Task 10 - `solid-flawed`
+
+Same Vite/Solid scaffold, shared stylesheet, harness setup, and `Region`
+label as `solid`, but flights live in a plain `createSignal` and are passed
+to `<For>` as freshly-decoded objects. `<For>` keys rows by object reference,
+so every tick rebuilds all rows. See `SpecUpdate2.md` §3 for the full code.
+
+**Acceptance check:** `solid-flawed` rebuilds all rows on same-region
+`ping`/`pingBatch` ticks, while `solid` (via `createStore` + `reconcile`)
+stays single-digit.
 
 ---
 
@@ -1162,7 +1188,7 @@ frameworks.
 2. From the repo root, run a static file server (`npx serve .` or
    equivalent) - do not serve from inside any individual implementation's
    directory, or the harness's relative paths will break.
-3. Open the top-level `index.html`, click through all 8 links, confirm each
+3. Open the top-level `index.html`, click through all 10 links, confirm each
    one's Apply button works and counters move.
 
 ---
@@ -1171,10 +1197,10 @@ frameworks.
 
 - [ ] `node harness/sequence/generate.mjs` reproduces `sequence.json` exactly,
       and every entry has a `kind` field
-- [ ] All 8 implementations build with no errors and no console errors at runtime
-- [ ] All 8 render visually identically (same table/tab styling) - only the
+- [ ] All 10 implementations build with no errors and no console errors at runtime
+- [ ] All 10 render visually identically (same table/tab styling) - only the
       counters/flash differ
-- [ ] `vanilla`'s same-region mutation count is the largest of all eight, by
+- [ ] `vanilla`'s same-region mutation count is the largest of all ten, by
       a wide margin
 - [ ] `react-compiled` is built and kept per Section 2's note; no
       DOM-mutation-count difference from `react-naive` is expected or required
@@ -1186,8 +1212,13 @@ frameworks.
 - [ ] `svelte` shows zero tab-bar mutations on same-region ticks
 - [ ] `laminar-naive` visibly rebuilds the tab bar on every tick, including
       same-region ticks
-- [ ] `laminar-fixed` shows zero tab-bar mutations on same-region ticks,
-      using the identical sequence as `laminar-naive`
+- [ ] `laminar-flawed` shows zero tab-bar mutations on same-region ticks, but
+      still rebuilds all table rows (near-full-table counts)
+- [ ] `laminar-fixed` shows zero tab-bar mutations AND only updates changed
+      cells/rows on same-region ticks (dramatically lower counts than
+      `laminar-flawed`)
+- [ ] `solid-flawed` rebuilds all rows on same-region `ping`/`pingBatch`
+      ticks (identity bug reproduced), while `solid` stays single-digit
 - [ ] reorder-only ticks (check `sequence.json` for steps where region and
       flight set are unchanged but order differs) produce a visibly
       different mutation pattern in at least the vanilla and one VDOM

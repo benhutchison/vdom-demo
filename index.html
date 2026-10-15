@@ -21,13 +21,15 @@
   <h2>Elm</h2>
   <a href="implementations/elm/dist/">elm — virtual-dom + Html.Lazy</a>
 
-  <h2>Solid</h2>
-  <a href="implementations/solid/dist/">solid — fine-grained signals</a>
+  <h2>Solid (fixed vs flawed)</h2>
+  <a href="implementations/solid/dist/">solid — createStore + reconcile</a>
+  <a href="implementations/solid-flawed/dist/">solid-flawed — createSignal, keys rows by reference</a>
 
   <h2>Svelte</h2>
   <a href="implementations/svelte/dist/">svelte — Svelte 5 runes</a>
 
-  <h2>Laminar (naive vs fixed)</h2>
+  <h2>Laminar (naive vs flawed vs fixed)</h2>
   <a href="implementations/laminar-naive/dist/">laminar-naive — bundled signal (bug)</a>
-  <a href="implementations/laminar-fixed/dist/">laminar-fixed — unbundled via .distinct (fix)</a>
+  <a href="implementations/laminar-flawed/dist/">laminar-flawed — region isolated, unkeyed rows rebuilt</a>
+  <a href="implementations/laminar-fixed/dist/">laminar-fixed — keyed rows via split(_.id)</a>
 </body></html>
